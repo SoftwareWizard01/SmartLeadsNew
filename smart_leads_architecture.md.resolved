@@ -1,0 +1,527 @@
+# Smart Leads Dashboard — Complete Architecture Blueprint
+
+> **Color Theme:** Black backgrounds · White text · Blue accents (`#2563EB` / `#3B82F6`)  
+> **Stack:** React + Vite + TailwindCSS · Node.js + Express · MongoDB · Docker
+
+---
+
+## 1. Complete Professional Folder Structure
+
+```
+SmartLeadsDashboard/
+├── docker-compose.yml
+├── .env.example
+├── README.md
+│
+├── backend/
+│   ├── Dockerfile
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── .env.example
+│   └── src/
+│       ├── app.ts                      # Express app bootstrap
+│       ├── server.ts                   # HTTP server entry point
+│       ├── config/
+│       │   ├── db.ts                   # Mongoose connection
+│       │   └── env.ts                  # Typed env loader (Zod-validated)
+│       ├── modules/
+│       │   ├── auth/
+│       │   │   ├── auth.controller.ts
+│       │   │   ├── auth.service.ts
+│       │   │   ├── auth.repository.ts
+│       │   │   ├── auth.routes.ts
+│       │   │   ├── auth.schema.ts      # Zod validators
+│       │   │   └── auth.types.ts
+│       │   └── leads/
+│       │       ├── lead.controller.ts
+│       │       ├── lead.service.ts
+│       │       ├── lead.repository.ts
+│       │       ├── lead.routes.ts
+│       │       ├── lead.schema.ts
+│       │       ├── lead.types.ts
+│       │       └── lead.model.ts       # Mongoose model
+│       ├── middlewares/
+│       │   ├── auth.middleware.ts      # JWT verification
+│       │   ├── rbac.middleware.ts      # Role-based guard factory
+│       │   ├── validate.middleware.ts  # Zod body/query validator
+│       │   └── error.middleware.ts     # Global error handler
+│       ├── models/
+│       │   └── user.model.ts           # Mongoose User model
+│       ├── shared/
+│       │   ├── types/
+│       │   │   ├── express.d.ts        # Express Request augmentation
+│       │   │   └── api.types.ts        # ApiResponse, PaginatedResponse
+│       │   └── utils/
+│       │       ├── apiResponse.ts      # success / error helper fns
+│       │       ├── asyncHandler.ts     # try/catch wrapper
+│       │       ├── csvExport.ts        # CSV generation utility
+│       │       └── jwt.ts              # sign / verify helpers
+│       └── routes/
+│           └── index.ts                # Mount all module routes
+│
+└── frontend/
+    ├── Dockerfile
+    ├── package.json
+    ├── tsconfig.json
+    ├── vite.config.ts
+    ├── tailwind.config.ts
+    ├── index.html
+    └── src/
+        ├── main.tsx
+        ├── App.tsx
+        ├── api/
+        │   ├── axios.ts                # Axios instance + interceptors
+        │   ├── auth.api.ts
+        │   └── leads.api.ts
+        ├── components/
+        │   ├── ui/                     # Pure, headless-style atoms
+        │   │   ├── Button.tsx
+        │   │   ├── Input.tsx
+        │   │   ├── Badge.tsx
+        │   │   ├── Modal.tsx
+        │   │   ├── Spinner.tsx
+        │   │   ├── Table.tsx
+        │   │   ├── Pagination.tsx
+        │   │   ├── EmptyState.tsx
+        │   │   └── ErrorState.tsx
+        │   ├── leads/
+        │   │   ├── LeadTable.tsx
+        │   │   ├── LeadRow.tsx
+        │   │   ├── LeadCard.tsx
+        │   │   ├── LeadFormModal.tsx
+        │   │   ├── LeadDetailDrawer.tsx
+        │   │   ├── LeadFilters.tsx
+        │   │   └── LeadStatusBadge.tsx
+        │   └── layout/
+        │       ├── Sidebar.tsx
+        │       ├── Topbar.tsx
+        │       ├── DashboardLayout.tsx
+        │       └── AuthLayout.tsx
+        ├── hooks/
+        │   ├── useLeads.ts             # React Query hooks
+        │   ├── useCreateLead.ts
+        │   ├── useUpdateLead.ts
+        │   ├── useDeleteLead.ts
+        │   ├── useDebounce.ts
+        │   ├── useCSVExport.ts
+        │   └── usePermissions.ts       # RBAC helper hook
+        ├── pages/
+        │   ├── auth/
+        │   │   ├── LoginPage.tsx
+        │   │   └── RegisterPage.tsx
+        │   └── dashboard/
+        │       ├── DashboardPage.tsx
+        │       └── LeadsPage.tsx
+        ├── schemas/
+        │   ├── auth.schema.ts          # Zod form schemas
+        │   └── lead.schema.ts
+        ├── store/
+        │   └── authStore.ts            # Zustand auth slice
+        ├── types/
+        │   ├── api.types.ts
+        │   ├── lead.types.ts
+        │   └── auth.types.ts
+        ├── layouts/
+        │   ├── ProtectedRoute.tsx
+        │   └── RoleGuard.tsx
+        └── lib/
+            └── constants.ts            # LEAD_STATUS, SOURCE, etc.
+```
+
+---
+
+## 2. Backend Architecture
+
+### Pattern: Controller → Service → Repository
+
+```
+HTTP Request
+    │
+    ▼
+Route (auth.routes.ts)
+    │
+    ▼
+Middleware Chain
+  ├── validate.middleware.ts   (Zod schema guard)
+  ├── auth.middleware.ts       (JWT verification)
+  └── rbac.middleware.ts       (role guard)
+    │
+    ▼
+Controller (auth.controller.ts)
+  └── Thin layer: parse request, call service, return response
+    │
+    ▼
+Service (auth.service.ts)
+  └── Business logic, orchestration, no DB concerns
+    │
+    ▼
+Repository (auth.repository.ts)
+  └── Pure data access layer — Mongoose queries only
+    │
+    ▼
+Mongoose Model → MongoDB
+```
+
+**Key principles:**
+- **Controller** never touches Mongoose directly
+- **Service** never imports `req`/`res`
+- **Repository** returns raw DB documents, service maps to DTOs
+- **asyncHandler** wraps all controllers — eliminates try/catch boilerplate
+- **Global error middleware** is the single point of failure formatting
+
+---
+
+## 3. Frontend Architecture
+
+### Layered data flow
+
+```
+Zustand (auth state, user role)
+        │
+        ▼
+React Query (server state — leads, pagination)
+        │
+        ▼
+Axios Instance (interceptors → attach JWT, refresh on 401)
+        │
+        ▼
+API Layer (leads.api.ts, auth.api.ts)
+        │
+        ▼
+Custom Hooks (useLeads, useCreateLead…)
+        │
+        ▼
+Page Components (LeadsPage)
+        │
+        ▼
+UI Components (LeadTable, LeadFilters, Pagination…)
+```
+
+**Key principles:**
+- **No direct Axios calls in components** — always via custom hooks
+- **React Query** owns all server state; components never `useState` for API data
+- **Zustand** owns only client-only global state (auth token, current user, theme)
+- **Zod schemas** are single source of truth for form types (inferred with `z.infer<>`)
+- **usePermissions** hook abstracts RBAC — no role checks scattered in JSX
+
+---
+
+## 4. Database Schema Design
+
+### User Model
+
+```typescript
+interface IUser {
+  _id: ObjectId;
+  name: string;
+  email: string;           // unique, indexed
+  password: string;        // bcrypt hash
+  role: 'admin' | 'sales';
+  createdAt: Date;
+  updatedAt: Date;
+}
+```
+
+### Lead Model
+
+```typescript
+interface ILead {
+  _id: ObjectId;
+  name: string;
+  email: string;           // unique, indexed
+  status: LeadStatus;      // indexed
+  source: LeadSource;      // indexed
+  notes?: string;
+  assignedTo?: ObjectId;   // ref: User (future-ready)
+  createdBy: ObjectId;     // ref: User
+  createdAt: Date;         // indexed (for sort)
+  updatedAt: Date;
+}
+
+type LeadStatus = 'new' | 'contacted' | 'qualified' | 'lost';
+type LeadSource = 'website' | 'instagram' | 'referral';
+```
+
+**Mongoose Index Strategy:**
+```typescript
+LeadSchema.index({ status: 1 });
+LeadSchema.index({ source: 1 });
+LeadSchema.index({ createdAt: -1 });
+LeadSchema.index({ name: 'text', email: 'text' }); // Full-text search
+```
+
+---
+
+## 5. API Design
+
+### Base URL: `/api/v1`
+
+#### Auth Endpoints
+
+| Method | Endpoint | Body | Auth | Description |
+|--------|----------|------|------|-------------|
+| POST | `/auth/register` | `{name, email, password, role}` | None | Register user |
+| POST | `/auth/login` | `{email, password}` | None | Login, get JWT |
+| GET | `/auth/me` | — | JWT | Get current user |
+
+#### Leads Endpoints
+
+| Method | Endpoint | Query Params | Auth | RBAC |
+|--------|----------|--------------|------|------|
+| GET | `/leads` | `status, source, search, sort, page, limit` | JWT | Admin + Sales |
+| GET | `/leads/:id` | — | JWT | Admin + Sales |
+| POST | `/leads` | — | JWT | Admin + Sales |
+| PUT | `/leads/:id` | — | JWT | Admin (full) / Sales (status only) |
+| DELETE | `/leads/:id` | — | JWT | Admin only |
+| GET | `/leads/export/csv` | `status, source, search` | JWT | Admin only |
+
+#### Standard Response Envelope
+
+```typescript
+// Success
+{
+  "success": true,
+  "message": "Leads retrieved successfully",
+  "data": Lead[],
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 50,
+    "pages": 5
+  }
+}
+
+// Error
+{
+  "success": false,
+  "message": "Unauthorized",
+  "errors": [{ "field": "email", "message": "Invalid email" }]  // optional
+}
+```
+
+---
+
+## 6. Authentication Flow
+
+```
+1. Register
+   POST /auth/register
+   → Validate body with Zod
+   → Check duplicate email
+   → Hash password (bcrypt, saltRounds=12)
+   → Save user to DB
+   → Sign JWT (payload: { userId, role }, exp: 7d)
+   → Return token + user object
+
+2. Login
+   POST /auth/login
+   → Validate body
+   → Find user by email
+   → bcrypt.compare(plainPassword, hashedPassword)
+   → Sign JWT
+   → Return token + user object
+
+3. Protected Request
+   Any /leads/* request
+   → Extract Bearer token from Authorization header
+   → jwt.verify(token, JWT_SECRET)
+   → Attach { userId, role } to req.user
+   → Pass to next middleware
+
+4. Frontend Token Lifecycle
+   → On login: store JWT in Zustand (memory) + localStorage (persistence)
+   → Axios interceptor: inject `Authorization: Bearer <token>` on every request
+   → On 401 response: clear store → redirect to /login
+   → On page refresh: rehydrate Zustand from localStorage
+```
+
+---
+
+## 7. RBAC Flow
+
+### Middleware Factory Pattern
+
+```typescript
+// Usage in routes:
+router.delete('/:id', authenticate, authorize('admin'), controller.deleteLead);
+router.put('/:id',    authenticate, authorize('admin', 'sales'), controller.updateLead);
+```
+
+### Permission Matrix
+
+| Action | Admin | Sales |
+|--------|:-----:|:-----:|
+| View all leads | ✅ | ✅ |
+| Create lead | ✅ | ✅ |
+| Update lead (full) | ✅ | ❌ |
+| Update lead status | ✅ | ✅ |
+| Delete lead | ✅ | ❌ |
+| Export CSV | ✅ | ❌ |
+
+### Service-Level Field Guard (Sales Update)
+```typescript
+// In lead.service.ts
+if (user.role === 'sales') {
+  // Strip everything except `status` from the update payload
+  const { status } = updateDto;
+  return this.leadRepository.updateById(id, { status });
+}
+return this.leadRepository.updateById(id, updateDto);
+```
+
+### Frontend RBAC Hook
+```typescript
+// hooks/usePermissions.ts
+const { can } = usePermissions();
+{can('delete:lead') && <DeleteButton />}
+```
+
+---
+
+## 8. Filtering + Pagination Strategy
+
+### Backend Query Builder (in Repository)
+
+```typescript
+// All filters composed into a single Mongoose query object
+const filter: FilterQuery<ILead> = {};
+
+if (status) filter.status = status;
+if (source) filter.source = source;
+if (search) filter.$text = { $search: search };  // uses text index
+
+const sortOrder = sort === 'oldest' ? 1 : -1;
+
+const [leads, total] = await Promise.all([
+  Lead.find(filter)
+    .sort({ createdAt: sortOrder })
+    .skip((page - 1) * limit)
+    .limit(limit)
+    .lean(),
+  Lead.countDocuments(filter),
+]);
+```
+
+### Query Parameter Contract
+```
+GET /api/v1/leads?status=qualified&source=instagram&search=rahul&sort=latest&page=2&limit=10
+```
+
+### Frontend Filter State (React Query key strategy)
+```typescript
+// Query key includes all filters → auto-refetch on filter change
+const queryKey = ['leads', { status, source, search, sort, page }];
+useQuery({ queryKey, queryFn: () => leadsApi.getLeads(filters) });
+```
+
+### Debounce Strategy
+```typescript
+// hooks/useDebounce.ts — 350ms delay on search input
+const debouncedSearch = useDebounce(searchInput, 350);
+// Passed into query key, so request only fires after user stops typing
+```
+
+---
+
+## 9. Recommended Reusable Components
+
+| Component | Purpose | Props |
+|-----------|---------|-------|
+| `Button` | All button variants | `variant`, `size`, `loading`, `disabled` |
+| `Input` | Form inputs with error display | `label`, `error`, `...register()` spread |
+| `Badge` | Status/source chips | `variant: 'status' \| 'source'`, `value` |
+| `Modal` | Create/Edit lead modal | `isOpen`, `onClose`, `title`, `children` |
+| `Spinner` | Loading indicator | `size`, `color` |
+| `Table` | Generic sortable table | `columns`, `data`, `loading`, `emptyState` |
+| `Pagination` | Page navigation | `page`, `pages`, `total`, `onPageChange` |
+| `EmptyState` | No-data illustration | `title`, `description`, `action` |
+| `ErrorState` | API failure fallback | `message`, `onRetry` |
+| `LeadStatusBadge` | Color-coded status | `status: LeadStatus` |
+| `LeadFilters` | Filter bar (status/source/search) | `filters`, `onChange` |
+| `ProtectedRoute` | Auth guard wrapper | `children` |
+| `RoleGuard` | Role-specific render guard | `allowedRoles`, `children` |
+
+---
+
+## 10. Full Development Roadmap
+
+### Phase 1 — Project Bootstrap (Day 1)
+- [ ] Initialize monorepo structure
+- [ ] Backend: Vite-less TS setup with `tsc` + `tsx` dev server
+- [ ] Frontend: `create-vite` with React + TS template
+- [ ] TailwindCSS configuration with custom design tokens (black/white/blue)
+- [ ] Docker Compose with MongoDB + backend + frontend containers
+- [ ] `.env.example` files
+- [ ] Git init + `.gitignore`
+
+### Phase 2 — Backend Core (Day 1–2)
+- [ ] `config/env.ts` — Zod-validated env loader
+- [ ] `config/db.ts` — Mongoose connection with retry logic
+- [ ] Global error middleware
+- [ ] `asyncHandler` utility
+- [ ] `apiResponse` helpers
+- [ ] User model + Mongoose schema
+- [ ] Auth module: register, login, `/me`
+- [ ] JWT utilities (sign/verify)
+- [ ] Auth middleware
+- [ ] RBAC middleware factory
+
+### Phase 3 — Leads API (Day 2–3)
+- [ ] Lead Mongoose model with indexes
+- [ ] Lead repository (CRUD + filter + pagination)
+- [ ] Lead service (business logic + field guards)
+- [ ] Lead controller (thin HTTP layer)
+- [ ] Zod validators for lead create/update
+- [ ] All 6 lead endpoints wired with RBAC
+- [ ] CSV export utility + endpoint
+
+### Phase 4 — Frontend Foundation (Day 3–4)
+- [ ] Axios instance with JWT interceptor
+- [ ] Zustand auth store
+- [ ] Auth API layer
+- [ ] Login + Register pages with React Hook Form + Zod
+- [ ] ProtectedRoute + RoleGuard components
+- [ ] DashboardLayout with Sidebar + Topbar
+
+### Phase 5 — Leads UI (Day 4–5)
+- [ ] Leads API layer
+- [ ] All React Query hooks (useLeads, useCreateLead, etc.)
+- [ ] LeadsPage with filter bar, table, pagination
+- [ ] LeadFormModal (create + edit)
+- [ ] LeadDetailDrawer
+- [ ] CSV export button (admin only)
+- [ ] Debounced search integration
+
+### Phase 6 — UI Polish & Atomic Components (Day 5–6)
+- [ ] All UI atoms (Button, Input, Badge, Modal, etc.)
+- [ ] Loading skeletons / spinners
+- [ ] Empty states + error states
+- [ ] Responsive mobile layout
+- [ ] Toast notifications (react-hot-toast)
+- [ ] Role-aware UI (hide delete/export for sales users)
+
+### Phase 7 — DevOps & Documentation (Day 6–7)
+- [ ] Backend Dockerfile (multi-stage)
+- [ ] Frontend Dockerfile (multi-stage with nginx)
+- [ ] `docker-compose.yml` (mongo + backend + frontend)
+- [ ] Environment variable documentation
+- [ ] Professional `README.md` with setup guide, API docs, screenshots
+- [ ] API reference table in README
+
+---
+
+## Architecture Decision Records (ADRs)
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Env validation | Zod in `config/env.ts` | Fail-fast on misconfiguration; typed access |
+| Async error handling | `asyncHandler` wrapper | Eliminates try/catch boilerplate in every controller |
+| Text search | MongoDB `$text` index | Native, no external dependency; sufficient for this scale |
+| Token storage | Zustand memory + localStorage | Memory prevents XSS exposure; localStorage enables refresh persistence |
+| Query keys | Object-based (all filters) | Auto-invalidation when any filter changes |
+| CSV generation | Server-side streaming | Avoids sending full dataset to client; handles large exports |
+| Debounce delay | 350ms | Responsive feel without hammering the API |
+
+---
+
+> ✅ **Architecture is locked. Awaiting your `go` command to begin Phase 1 implementation.**

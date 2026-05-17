@@ -1,0 +1,62 @@
+version: '3.9'
+
+services:
+  mongo:
+    image: mongo:7.0
+    container_name: sld_mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-secret}
+      MONGO_INITDB_DATABASE: ${MONGO_DB_NAME:-smartleads}
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - sld_network
+    healthcheck:
+      test: ['CMD', 'mongosh', '--eval', "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sld_backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    ports:
+      - '5000:5000'
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - sld_network
+    volumes:
+      - ./backend/src:/app/src
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: sld_frontend
+    restart: unless-stopped
+    env_file:
+      - ./frontend/.env
+    ports:
+      - '3000:80'
+    depends_on:
+      - backend
+    networks:
+      - sld_network
+
+volumes:
+  mongo_data:
+
+networks:
+  sld_network:
+    driver: bridge
